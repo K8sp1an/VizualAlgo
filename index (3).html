@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Зельда: сжатие дерева</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ocean:#0E7BAD; --coral:#FF6B6B; --mint:#06D6A0; --sand:#FFF3DC; --dark:#0D1B2A;
+  --ocean-soft:#0E7BAD22; --coral-soft:#FF6B6B22; --mint-soft:#06D6A022;
+  /* light is the default palette so vars are always defined */
+  --bg:#FBF3E2; --bg2:#FFF8EC; --card:#FFFFFF; --ink:#0D1B2A;
+  --muted:rgba(13,27,42,.58); --faint:rgba(13,27,42,.34);
+  --border:rgba(13,27,42,.10); --border2:rgba(13,27,42,.16);
+  --shadow:0 18px 40px -18px rgba(13,27,42,.28); --shadow-sm:0 4px 14px -6px rgba(13,27,42,.20);
+  --canvas:#FFFCF5; --node-internal:#0E7BAD; --node-ink:#fff;
+}
+[data-theme="light"]{
+  --bg:#FBF3E2; --bg2:#FFF8EC; --card:#FFFFFF; --ink:#0D1B2A;
+  --muted:rgba(13,27,42,.58); --faint:rgba(13,27,42,.34);
+  --border:rgba(13,27,42,.10); --border2:rgba(13,27,42,.16);
+  --shadow:0 18px 40px -18px rgba(13,27,42,.28); --shadow-sm:0 4px 14px -6px rgba(13,27,42,.20);
+  --canvas:#FFFCF5; --node-internal:#0E7BAD; --node-ink:#fff;
+}
+[data-theme="dark"]{
+  --bg:#0A1622; --bg2:#0D1B2A; --card:#13263B; --ink:#FFF6E6;
+  --muted:rgba(255,243,220,.66); --faint:rgba(255,243,220,.40);
+  --border:rgba(255,243,220,.12); --border2:rgba(255,243,220,.20);
+  --shadow:0 22px 50px -20px rgba(0,0,0,.6); --shadow-sm:0 6px 18px -8px rgba(0,0,0,.5);
+  --canvas:#0E1E2E; --node-internal:#2E9BCF; --node-ink:#04121E;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{
+  font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--ink);
+  -webkit-font-smoothing:antialiased;line-height:1.5;
+  transition:background .4s ease,color .4s ease;overflow-x:hidden;
+}
+.bg-orbs{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
+.bg-orbs span{position:absolute;border-radius:50%;filter:blur(70px);opacity:.5}
+.bg-orbs span:nth-child(1){width:420px;height:420px;background:var(--ocean);top:-140px;right:-120px;opacity:.16}
+.bg-orbs span:nth-child(2){width:360px;height:360px;background:var(--mint);bottom:-160px;left:-120px;opacity:.14}
+.bg-orbs span:nth-child(3){width:300px;height:300px;background:var(--coral);top:40%;left:60%;opacity:.10}
+
+/* ---------- Top nav (desktop) ---------- */
+.topbar{
+  position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:18px;
+  padding:14px clamp(16px,4vw,40px);background:color-mix(in srgb,var(--bg) 78%,transparent);
+  backdrop-filter:blur(16px);border-bottom:1px solid var(--border);
+}
+.brand{display:flex;align-items:center;gap:11px;font-weight:800;letter-spacing:-.02em;font-size:18px}
+.brand .mark{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--ocean),var(--mint));
+  display:grid;place-items:center;box-shadow:var(--shadow-sm);flex:none}
+.brand .mark svg{width:20px;height:20px}
+.brand small{display:block;font-weight:500;font-size:11px;color:var(--muted);letter-spacing:.01em;margin-top:-2px}
+.nav-tabs{display:flex;gap:4px;margin-left:8px}
+.nav-tabs button{
+  font:inherit;font-weight:600;font-size:14px;color:var(--muted);background:none;border:none;
+  padding:9px 16px;border-radius:11px;cursor:pointer;transition:.2s;position:relative;
+}
+.nav-tabs button:hover{color:var(--ink);background:var(--bg2)}
+.nav-tabs button.active{color:var(--ink);background:var(--card);box-shadow:var(--shadow-sm)}
+.nav-tabs button.active::after{content:"";position:absolute;left:16px;right:16px;bottom:5px;height:2px;border-radius:2px;background:var(--ocean)}
+.spacer{flex:1}
+.theme-toggle{
+  width:46px;height:46px;border-radius:13px;border:1px solid var(--border);background:var(--card);
+  cursor:pointer;display:grid;place-items:center;color:var(--ink);transition:.2s;box-shadow:var(--shadow-sm)
+}
+.theme-toggle:hover{transform:translateY(-1px);border-color:var(--border2)}
+.theme-toggle svg{width:21px;height:21px}
+.theme-toggle .sun{display:none}
+[data-theme="dark"] .theme-toggle .sun{display:block}
+[data-theme="dark"] .theme-toggle .moon{display:none}
+
+/* ---------- layout ---------- */
+.wrap{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:clamp(18px,3vw,34px) clamp(16px,4vw,40px) 120px}
+.page{display:none}
+.page.active{display:block}
+@media (prefers-reduced-motion: no-preference){
+  .page.active.enter{animation:fadeUp .42s cubic-bezier(.2,.7,.2,1)}
+}
+@keyframes fadeUp{from{transform:translateY(16px)}to{transform:none}}
+.page-head{margin-bottom:22px}
+.eyebrow{display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--ocean);background:var(--ocean-soft);padding:6px 12px;border-radius:999px;margin-bottom:14px}
+.eyebrow .dot{width:7px;height:7px;border-radius:50%;background:var(--ocean)}
+h1.title{font-size:clamp(26px,5vw,40px);font-weight:800;letter-spacing:-.03em;margin:0 0 8px}
+.sub{color:var(--muted);font-size:clamp(14px,2.4vw,16px);max-width:60ch;margin:0}
+
+.card{background:var(--card);border:1px solid var(--border);border-radius:20px;box-shadow:var(--shadow)}
+
+/* ---------- visualizer ---------- */
+.viz-grid{display:grid;grid-template-columns:1fr;gap:18px}
+@media(min-width:900px){.viz-grid{grid-template-columns:1fr 300px}}
+.canvas-card{padding:0;overflow:hidden;position:relative;min-height:340px}
+.canvas-wrap{position:relative;width:100%;aspect-ratio:16/11;background:
+  radial-gradient(circle at 1px 1px,var(--border) 1px,transparent 0) 0 0/26px 26px,var(--canvas)}
+@media(max-width:640px){.canvas-wrap{aspect-ratio:1/1}}
+svg.tree{position:absolute;inset:0;width:100%;height:100%;touch-action:manipulation}
+.edge{stroke:var(--faint);stroke-width:3.2;transition:stroke .3s}
+.edge.path{stroke:var(--coral);stroke-width:5}
+.node-hit{fill:transparent;cursor:pointer}
+.node-c{stroke:var(--card);stroke-width:3;transition:fill .3s}
+.node-label{font:600 17px 'Inter';fill:var(--node-ink);text-anchor:middle;dominant-baseline:central;pointer-events:none;user-select:none}
+.node.leaf .node-c{fill:var(--mint)}
+.node.internal .node-c{fill:var(--node-internal)}
+.node.fresh .node-c{fill:var(--coral)}
+.node.sel .node-c{stroke:var(--dark);stroke-width:4;filter:drop-shadow(0 0 0 var(--coral))}
+.node.path .node-c{stroke:var(--coral);stroke-width:4}
+.node.sel .node-label,[data-theme] .node.leaf .node-label{fill:var(--node-ink)}
+.node.leaf .node-label{fill:#04121E}
+.node.fresh .node-label{fill:#3a0000}
+
+.canvas-empty{position:absolute;inset:0;display:grid;place-items:center;text-align:center;color:var(--faint);
+  font-size:15px;padding:24px;pointer-events:none}
+.canvas-empty b{display:block;color:var(--muted);font-size:16px;margin-bottom:6px}
+.legend{position:absolute;left:14px;bottom:12px;display:flex;gap:14px;flex-wrap:wrap;font-size:12px;font-weight:600;color:var(--muted);
+  background:color-mix(in srgb,var(--card) 80%,transparent);padding:8px 12px;border-radius:12px;backdrop-filter:blur(6px);border:1px solid var(--border)}
+.legend i{width:11px;height:11px;border-radius:50%;display:inline-block;margin-right:5px;vertical-align:-1px}
+.mode-pill{position:absolute;top:14px;left:14px;font-size:12px;font-weight:700;color:var(--ocean);background:var(--ocean-soft);
+  padding:7px 13px;border-radius:999px;display:flex;align-items:center;gap:7px;backdrop-filter:blur(6px)}
+.mode-pill .dot{width:7px;height:7px;border-radius:50%;background:var(--ocean);animation:pulse 1.6s infinite}
+@keyframes pulse{50%{opacity:.35}}
+
+/* side panel */
+.panel{display:flex;flex-direction:column;gap:14px}
+.tool-card{padding:18px}
+.tool-card h3{margin:0 0 12px;font-size:13px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.btn{font:inherit;font-weight:600;font-size:14px;border-radius:12px;border:1px solid var(--border2);background:var(--card);
+  color:var(--ink);padding:11px 14px;cursor:pointer;transition:.18s;display:flex;align-items:center;gap:9px;width:100%;text-align:left}
+.btn svg{width:18px;height:18px;flex:none;opacity:.8}
+.btn:hover{transform:translateY(-1px);border-color:var(--ocean);box-shadow:var(--shadow-sm)}
+.btn.active{background:var(--ocean);color:#fff;border-color:var(--ocean)}
+.btn.active svg{opacity:1}
+.btn.primary{background:linear-gradient(135deg,var(--ocean),#0a6790);color:#fff;border:none;justify-content:center;font-weight:700}
+.btn.ghost{justify-content:center;color:var(--muted)}
+.btn.coral{background:linear-gradient(135deg,var(--coral),#e85555);color:#fff;border:none}
+.btn-row{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+
+.counter{padding:18px;display:flex;flex-direction:column;gap:14px}
+.counter .row{display:flex;align-items:baseline;justify-content:space-between}
+.counter .lab{font-size:13px;color:var(--muted);font-weight:600}
+.counter .big{font-size:34px;font-weight:800;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.counter .big.used{color:var(--ocean)}
+.counter .big.min{color:var(--mint)}
+.progress{height:9px;border-radius:99px;background:var(--bg2);overflow:hidden}
+.progress i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--ocean),var(--mint));width:0;transition:width .5s cubic-bezier(.2,.7,.2,1)}
+.counter .hint{font-size:12.5px;color:var(--faint);line-height:1.45}
+.stat-mini{display:flex;gap:10px}
+.stat-mini>div{flex:1;background:var(--bg2);border-radius:12px;padding:10px 12px}
+.stat-mini .v{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums}
+.stat-mini .k{font-size:11px;color:var(--muted);font-weight:600}
+
+/* tooltip */
+.tip{position:fixed;z-index:99;pointer-events:none;background:var(--dark);color:#fff;font-size:12.5px;font-weight:600;
+  padding:7px 11px;border-radius:9px;transform:translate(-50%,-130%);opacity:0;transition:opacity .15s;white-space:nowrap;box-shadow:0 8px 20px rgba(0,0,0,.3)}
+.tip.show{opacity:1}
+.tip b{color:var(--mint)}
+
+/* toast */
+.toast{position:fixed;left:50%;bottom:96px;transform:translate(-50%,20px);z-index:120;background:var(--dark);color:#fff;
+  font-weight:600;font-size:14px;padding:12px 20px;border-radius:14px;opacity:0;transition:.3s;pointer-events:none;box-shadow:0 12px 30px rgba(0,0,0,.35)}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.toast.win{background:linear-gradient(135deg,var(--mint),var(--ocean))}
+
+/* ---------- algorithm page ---------- */
+.algo-grid{display:grid;grid-template-columns:1fr;gap:18px}
+@media(min-width:880px){.algo-grid{grid-template-columns:1fr 1fr}}
+.code-card{padding:20px;display:flex;flex-direction:column}
+.code-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+.code-head h3{margin:0;font-size:17px;font-weight:800;letter-spacing:-.01em;display:flex;align-items:center;gap:9px}
+.tag{font-size:11px;font-weight:700;padding:4px 9px;border-radius:7px}
+.tag.brute{color:var(--coral);background:var(--coral-soft)}
+.tag.opt{color:var(--mint);background:var(--mint-soft)}
+.badges{display:flex;gap:7px;margin-bottom:14px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;font-family:'JetBrains Mono',monospace;padding:5px 10px;border-radius:8px;border:1px solid var(--border2);color:var(--muted);display:flex;gap:6px;align-items:center}
+.badge b{color:var(--ocean)}
+.code{font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.7;background:var(--bg2);border-radius:13px;padding:14px 8px;flex:1}
+.cl{display:flex;padding:2px 12px;border-radius:7px;transition:.25s;white-space:pre-wrap}
+.cl .ln{color:var(--faint);width:22px;flex:none;user-select:none;text-align:right;margin-right:14px}
+.cl.on{background:color-mix(in srgb,var(--coral) 18%,transparent)}
+.code.opt .cl.on{background:color-mix(in srgb,var(--mint) 18%,transparent)}
+.cl.on .ln{color:var(--ink)}
+.tok-kw{color:var(--ocean);font-weight:600}
+.tok-fn{color:var(--coral)}
+.code.opt .tok-fn{color:var(--mint)}
+.tok-cm{color:var(--faint)}
+.tok-nm{color:#c08a2c}
+[data-theme="dark"] .tok-nm{color:#e0b24f}
+.algo-actions{display:flex;gap:10px;margin:4px 0 18px;flex-wrap:wrap}
+.bench{padding:22px}
+.bench h3{margin:0 0 4px;font-size:18px;font-weight:800}
+.bench p.sub{margin-bottom:18px}
+.bench-input{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:22px}
+.bench-input label{font-weight:600;font-size:14px;color:var(--muted)}
+.bench-input input[type=range]{flex:1;min-width:160px;accent-color:var(--ocean)}
+.npill{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:15px;background:var(--ocean);color:#fff;padding:6px 13px;border-radius:9px;min-width:74px;text-align:center}
+.bars{display:flex;flex-direction:column;gap:16px}
+.bar-row .bl{display:flex;justify-content:space-between;font-size:13px;font-weight:600;margin-bottom:7px}
+.bar-row .bl b{font-family:'JetBrains Mono',monospace}
+.bar-track{height:30px;border-radius:9px;background:var(--bg2);overflow:hidden}
+.bar-fill{height:100%;border-radius:9px;transition:width .6s cubic-bezier(.2,.7,.2,1);display:flex;align-items:center;justify-content:flex-end;padding-right:10px;color:#fff;font-size:12px;font-weight:700;font-family:'JetBrains Mono',monospace}
+.bar-fill.brute{background:linear-gradient(90deg,#ff8a8a,var(--coral))}
+.bar-fill.opt{background:linear-gradient(90deg,#3ee0b6,var(--mint))}
+.verdict{margin-top:18px;font-size:13.5px;color:var(--muted);background:var(--bg2);border-radius:12px;padding:13px 15px;border-left:3px solid var(--mint)}
+.verdict b{color:var(--ink)}
+
+/* ---------- facts ---------- */
+.facts-grid{display:grid;grid-template-columns:1fr;gap:16px}
+@media(min-width:640px){.facts-grid{grid-template-columns:1fr 1fr}}
+.fact{padding:22px;transition:.25s;cursor:default;position:relative;overflow:hidden}
+.fact:hover{transform:translateY(-4px);box-shadow:var(--shadow)}
+.fact .ic{width:50px;height:50px;border-radius:14px;display:grid;place-items:center;margin-bottom:15px}
+.fact .ic svg{width:26px;height:26px}
+.fact h3{margin:0 0 8px;font-size:18px;font-weight:800;letter-spacing:-.01em}
+.fact p{margin:0;color:var(--muted);font-size:14.5px;line-height:1.55}
+.fact .where{display:inline-block;margin-top:13px;font-size:11.5px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--ocean)}
+.dyk{margin-top:22px;padding:26px;text-align:center;background:linear-gradient(135deg,var(--ocean),#0a5d83);color:#fff;border-radius:22px;position:relative;overflow:hidden}
+.dyk::before{content:"";position:absolute;width:280px;height:280px;border-radius:50%;background:#ffffff14;top:-120px;right:-80px}
+.dyk h3{margin:0 0 6px;font-size:13px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;opacity:.85}
+.dyk .ftext{font-size:clamp(17px,3vw,22px);font-weight:700;letter-spacing:-.01em;min-height:60px;display:grid;place-items:center;transition:.3s}
+.dyk button{margin-top:16px;font:inherit;font-weight:700;font-size:14px;background:#fff;color:var(--ocean);border:none;padding:12px 24px;border-radius:13px;cursor:pointer;transition:.2s}
+.dyk button:hover{transform:translateY(-2px);box-shadow:0 10px 24px rgba(0,0,0,.25)}
+
+/* ---------- bottom nav (mobile) ---------- */
+.bottomnav{position:fixed;left:0;right:0;bottom:0;z-index:60;display:none;
+  background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(18px);border-top:1px solid var(--border);
+  padding:8px 8px calc(8px + env(safe-area-inset-bottom))}
+.bottomnav .bn{display:flex;justify-content:space-around}
+.bottomnav button{flex:1;background:none;border:none;font:inherit;color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:4px;
+  padding:7px 4px;border-radius:13px;cursor:pointer;font-size:11px;font-weight:600;transition:.2s}
+.bottomnav button svg{width:23px;height:23px}
+.bottomnav button.active{color:var(--ocean)}
+.bottomnav button.active svg{transform:translateY(-1px)}
+
+@media(max-width:760px){
+  .nav-tabs{display:none}
+  .brand small{display:none}
+  .bottomnav{display:block}
+  .wrap{padding-bottom:96px}
+  .btn-row{grid-template-columns:1fr 1fr}
+}
+/* confetti */
+.confetti{position:fixed;top:-12px;z-index:200;pointer-events:none;border-radius:2px}
+@keyframes fall{to{transform:translateY(110vh) rotate(720deg);opacity:.9}}
+</style>
+</head>
+<body>
+<div class="bg-orbs"><span></span><span></span><span></span></div>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="mark"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="5" r="2.4" fill="#fff"/><circle cx="5" cy="18" r="2.4" fill="#fff"/><circle cx="19" cy="18" r="2.4" fill="#fff"/><path d="M12 7.4 6.2 16M12 7.4 17.8 16" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/></svg></span>
+    <div>Зельда<small>сжатие деревьев · визуализация</small></div>
+  </div>
+  <nav class="nav-tabs">
+    <button data-tab="viz" class="active">Визуализатор</button>
+    <button data-tab="algo">Алгоритм</button>
+    <button data-tab="facts">Интересные факты</button>
+  </nav>
+  <div class="spacer"></div>
+  <button class="theme-toggle" id="themeBtn" aria-label="Сменить тему">
+    <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+    <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+  </button>
+</header>
+
+<main class="wrap">
+
+  <!-- ================= TAB 1 : VISUALIZER ================= -->
+  <section class="page active" id="page-viz">
+    <div class="page-head">
+      <span class="eyebrow"><span class="dot"></span>операция «Зельда»</span>
+      <h1 class="title">Визуализатор сжатия дерева</h1>
+      <p class="sub">Постройте дерево или сгенерируйте случайное. Выбирайте два листа — путь между ними сожмётся в одну вершину. Сожмите всё дерево до единственной вершины за минимальное число шагов.</p>
+    </div>
+
+    <div class="viz-grid">
+      <div class="card canvas-card">
+        <div class="canvas-wrap">
+          <svg class="tree" id="svg" viewBox="0 0 600 412" preserveAspectRatio="xMidYMid meet">
+            <g id="edges"></g><g id="nodes"></g>
+          </svg>
+          <div class="mode-pill" id="modePill"><span class="dot"></span><span id="modeText">Режим: рёбра</span></div>
+          <div class="canvas-empty" id="emptyHint" style="display:none"><b>Холст пуст</b>Нажмите «Случайное дерево» или включите режим «Вершина» и кликайте по холсту</div>
+          <div class="legend">
+            <span><i style="background:var(--mint)"></i>лист</span>
+            <span><i style="background:var(--node-internal)"></i>внутренняя</span>
+            <span><i style="background:var(--coral)"></i>путь / новая</span>
+          </div>
+        </div>
+      </div>
+
+      <aside class="panel">
+        <div class="card counter">
+          <div class="row">
+            <span class="lab">Операций использовано</span>
+            <span class="big used" id="opsUsed">0</span>
+          </div>
+          <div class="row" style="margin-top:-8px">
+            <span class="lab">Минимум нужно</span>
+            <span class="big min" id="opsMin">0</span>
+          </div>
+          <div class="progress"><i id="progBar"></i></div>
+          <div class="stat-mini">
+            <div><div class="v" id="statNodes">0</div><div class="k">вершин</div></div>
+            <div><div class="v" id="statLeaves">0</div><div class="k">листьев</div></div>
+          </div>
+          <div class="hint" id="counterHint">Минимум = ⌈число листьев / 2⌉. Каждая операция «съедает» до двух листьев.</div>
+        </div>
+
+        <div class="card tool-card">
+          <h3>Построение</h3>
+          <div style="display:flex;flex-direction:column;gap:9px">
+            <button class="btn" data-mode="node"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3" stroke-linecap="round"/></svg>Добавить вершину</button>
+            <button class="btn" data-mode="edge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8 8l8 8" stroke-linecap="round"/></svg>Добавить ребро</button>
+            <button class="btn" data-mode="zelda"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 4 14h6l-1 8 9-12h-6z" stroke-linejoin="round"/></svg>Сжать листья (Зельда)</button>
+          </div>
+        </div>
+
+        <div class="card tool-card">
+          <h3>Действия</h3>
+          <button class="btn primary" id="randomBtn" style="margin-bottom:9px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 3v5h-5M3 21v-5h5" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 8a9 9 0 0 0-15-3M3 16a9 9 0 0 0 15 3" stroke-linecap="round"/></svg>Случайное дерево</button>
+          <div class="btn-row">
+            <button class="btn ghost" id="autoBtn">Решить за меня</button>
+            <button class="btn ghost" id="clearBtn">Очистить</button>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ================= TAB 2 : ALGORITHM ================= -->
+  <section class="page" id="page-algo">
+    <div class="page-head">
+      <span class="eyebrow"><span class="dot"></span>как найти листья</span>
+      <h1 class="title">Два подхода к поиску листьев</h1>
+      <p class="sub">Ключевой шаг операции «Зельда» — найти листья дерева. Сравним «лобовой» способ через список смежности и оптимальный — за один проход по рёбрам.</p>
+    </div>
+
+    <div class="algo-actions">
+      <button class="btn primary" id="runCode" style="width:auto"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5v14l11-7z"/></svg>Запустить по строкам</button>
+      <button class="btn ghost" id="resetCode" style="width:auto">Сбросить подсветку</button>
+    </div>
+
+    <div class="algo-grid">
+      <div class="card code-card">
+        <div class="code-head"><h3>Лобовой подход <span class="tag brute">brute force</span></h3></div>
+        <div class="badges"><span class="badge"><b>⏱</b> Время <b>O(N)</b></span><span class="badge"><b>▦</b> Память <b>O(N)</b></span><span class="badge">~3N операций</span></div>
+        <div class="code" id="codeBrute"></div>
+      </div>
+
+      <div class="card code-card">
+        <div class="code-head"><h3>Оптимальный подход <span class="tag opt">один проход</span></h3></div>
+        <div class="badges"><span class="badge"><b>⏱</b> Время <b>O(N)</b></span><span class="badge"><b>▦</b> Память <b>O(N)</b></span><span class="badge">~2N операций</span></div>
+        <div class="code opt" id="codeOpt"></div>
+      </div>
+    </div>
+
+    <div class="card bench" style="margin-top:18px">
+      <h3>Живой бенчмарк</h3>
+      <p class="sub">Оба алгоритма имеют сложность O(N), но различаются константой. Двигайте ползунок — число операций пересчитывается вживую.</p>
+      <div class="bench-input">
+        <label>Размер дерева N</label>
+        <input type="range" id="nRange" min="10" max="1000000" step="10" value="50000">
+        <span class="npill" id="nVal">50 000</span>
+      </div>
+      <div class="bars">
+        <div class="bar-row">
+          <div class="bl"><span>Лобовой (список смежности)</span><b id="bruteOps">—</b></div>
+          <div class="bar-track"><div class="bar-fill brute" id="bruteBar"></div></div>
+        </div>
+        <div class="bar-row">
+          <div class="bl"><span>Оптимальный (массив степеней)</span><b id="optOps">—</b></div>
+          <div class="bar-track"><div class="bar-fill opt" id="optBar"></div></div>
+        </div>
+      </div>
+      <div class="verdict" id="verdict"></div>
+    </div>
+  </section>
+
+  <!-- ================= TAB 3 : FACTS ================= -->
+  <section class="page" id="page-facts">
+    <div class="page-head">
+      <span class="eyebrow"><span class="dot"></span>в реальном мире</span>
+      <h1 class="title">Где живёт сжатие деревьев</h1>
+      <p class="sub">Операция стягивания путей и сжатия деревьев — не просто учебная задача. Она встречается во множестве реальных систем.</p>
+    </div>
+    <div class="facts-grid" id="factsGrid"></div>
+
+    <div class="dyk">
+      <h3>А вы знали?</h3>
+      <div class="ftext" id="dykText">Нажмите кнопку, чтобы узнать случайный факт о деревьях и алгоритмах.</div>
+      <button id="dykBtn">Показать факт →</button>
+    </div>
+  </section>
+</main>
+
+<!-- bottom nav -->
+<nav class="bottomnav"><div class="bn">
+  <button data-tab="viz" class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="4.5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 6.5 6 17M12 6.5 18 17" stroke-linecap="round"/></svg>Дерево</button>
+  <button data-tab="algo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6 3 12l5 6M16 6l5 6-5 6M13 4l-2 16" stroke-linecap="round" stroke-linejoin="round"/></svg>Алгоритм</button>
+  <button data-tab="facts"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a6 6 0 0 0-4 10.5c.8.7 1 1.2 1 2.5h6c0-1.3.2-1.8 1-2.5A6 6 0 0 0 12 3z"/><path d="M9 19h6M10 22h4" stroke-linecap="round"/></svg>Факты</button>
+</div></nav>
+
+<div class="tip" id="tip"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============================================================
+   THEME + TABS
+============================================================ */
+const root=document.documentElement;
+(function(){const s=localStorage.getItem('zelda-theme');if(s)root.setAttribute('data-theme',s);})();
+themeBtn.onclick=()=>{const n=root.getAttribute('data-theme')==='dark'?'light':'dark';root.setAttribute('data-theme',n);localStorage.setItem('zelda-theme',n);drawFrame();};
+function setTab(t,animate){
+  document.querySelectorAll('.page').forEach(p=>{const on=p.id==='page-'+t;p.classList.toggle('active',on);
+    if(on&&animate){p.classList.remove('enter');void p.offsetWidth;p.classList.add('enter');}});
+  document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===t));
+  localStorage.setItem('zelda-tab',t);
+  if(t==='viz')requestAnimationFrame(()=>{relayout(true);});
+}
+document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>setTab(b.dataset.tab,true));
+
+function toast(msg,win){const el=document.getElementById('toast');el.textContent=msg;el.className='toast show'+(win?' win':'');clearTimeout(el._t);el._t=setTimeout(()=>el.className='toast',win?2600:1800);}
+
+/* ============================================================
+   GRAPH MODEL
+============================================================ */
+const VW=600,VH=412;
+let nodes=new Map();   // id -> {id,x,y,tx,ty,r,tr,label}
+let adj=new Map();     // id -> Set(neighborId)
+let nextId=0, opsUsed=0, opsMin=0, frozenMin=false;
+let mode='edge', selA=null, busy=false;
+let pathSet=new Set(), pathEdges=new Set();
+const svg=document.getElementById('svg');
+const gEdges=document.getElementById('edges'), gNodes=document.getElementById('nodes');
+const nodeEls=new Map();
+
+const deg=id=>adj.get(id)?adj.get(id).size:0;
+const isLeaf=id=>deg(id)===1;
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+
+function addNode(x,y){const id=nextId++;nodes.set(id,{id,x,y,tx:x,ty:y,r:0,tr:22,label:id+1});adj.set(id,new Set());return id;}
+function addEdge(a,b){if(a===b)return;adj.get(a).add(b);adj.get(b).add(a);}
+function removeNode(id){for(const n of adj.get(id))adj.get(n).delete(id);adj.delete(id);nodes.delete(id);
+  const el=nodeEls.get(id);if(el){el.remove();nodeEls.delete(id);}}
+
+function clearAll(){nodes.clear();adj.clear();nodeEls.clear();gNodes.innerHTML='';gEdges.innerHTML='';
+  nextId=0;opsUsed=0;opsMin=0;frozenMin=false;selA=null;pathSet.clear();pathEdges.clear();updateHUD();}
+
+/* ---------- random tree ---------- */
+function randomTree(){
+  if(busy)return;clearAll();
+  const n=5+Math.floor(Math.random()*8); // 5..12
+  const cx=VW/2,cy=VH/2;
+  addNode(cx+(Math.random()-.5)*40,cy+(Math.random()-.5)*40);
+  for(let i=1;i<n;i++){
+    const j=Math.floor(Math.random()*i);
+    const p=nodes.get(j), ang=Math.random()*Math.PI*2, d=90+Math.random()*50;
+    const id=addNode(p.x+Math.cos(ang)*d,p.y+Math.sin(ang)*d);
+    addEdge(id,j);
+  }
+  opsUsed=0;frozenMin=false;updateMin();updateHUD();relayout(true);renderNodes();
+  toast('Случайное дерево: '+n+' вершин');
+}
+
+function countLeaves(){let c=0;for(const id of nodes.keys())if(isLeaf(id))c++;return c;}
+function updateMin(){if(!frozenMin)opsMin=Math.max(0,Math.ceil(countLeaves()/2));}
+
+/* ============================================================
+   FORCE LAYOUT
+============================================================ */
+function relayout(snap){
+  const ids=[...nodes.keys()];
+  if(ids.length===0){updateHUD();return;}
+  if(ids.length===1){const o=nodes.get(ids[0]);o.tx=VW/2;o.ty=VH/2;if(snap){o.x=o.tx;o.y=o.ty;}updateHUD();return;}
+  const P={};ids.forEach(id=>{const o=nodes.get(id);P[id]={x:o.x||Math.random()*VW,y:o.y||Math.random()*VH};});
+  const L=130;
+  for(let it=0;it<320;it++){
+    const F={};ids.forEach(id=>F[id]={x:0,y:0});
+    for(let i=0;i<ids.length;i++)for(let j=i+1;j<ids.length;j++){
+      const a=P[ids[i]],b=P[ids[j]];let dx=a.x-b.x,dy=a.y-b.y,d2=dx*dx+dy*dy||.01,d=Math.sqrt(d2);
+      const rep=9000/d2;F[ids[i]].x+=dx/d*rep;F[ids[i]].y+=dy/d*rep;F[ids[j]].x-=dx/d*rep;F[ids[j]].y-=dy/d*rep;
+    }
+    for(const a of ids)for(const b of adj.get(a)){if(a<b){
+      const pa=P[a],pb=P[b];let dx=pb.x-pa.x,dy=pb.y-pa.y,d=Math.sqrt(dx*dx+dy*dy)||.01,f=(d-L)*.045;
+      F[a].x+=dx/d*f*L*.5;F[a].y+=dy/d*f*L*.5;F[b].x-=dx/d*f*L*.5;F[b].y-=dy/d*f*L*.5;
+    }}
+    ids.forEach(id=>{F[id].x+=(VW/2-P[id].x)*.012;F[id].y+=(VH/2-P[id].y)*.012;
+      P[id].x+=Math.max(-22,Math.min(22,F[id].x));P[id].y+=Math.max(-22,Math.min(22,F[id].y));});
+  }
+  let minX=1e9,maxX=-1e9,minY=1e9,maxY=-1e9;
+  ids.forEach(id=>{minX=Math.min(minX,P[id].x);maxX=Math.max(maxX,P[id].x);minY=Math.min(minY,P[id].y);maxY=Math.max(maxY,P[id].y);});
+  const pad=52,sw=(maxX-minX)||1,sh=(maxY-minY)||1;
+  const s=Math.min((VW-2*pad)/sw,(VH-2*pad)/sh,1.6);
+  const ox=(VW-sw*s)/2-minX*s, oy=(VH-2*pad-sh*s)/2+pad-minY*s + 6;
+  ids.forEach(id=>{const o=nodes.get(id);o.tx=P[id].x*s+ox;o.ty=P[id].y*s+oy;if(snap){o.x=o.tx;o.y=o.ty;}});
+  updateHUD();
+}
+
+/* ============================================================
+   RENDER (rAF animator)
+============================================================ */
+function renderNodes(){
+  for(const id of nodes.keys()){
+    if(nodeEls.has(id))continue;
+    const g=document.createElementNS('http://www.w3.org/2000/svg','g');g.setAttribute('class','node');
+    g.innerHTML=`<circle class="node-hit" r="34"></circle><circle class="node-c" r="22"></circle><text class="node-label"></text>`;
+    g.querySelector('.node-label').textContent=nodes.get(id).label;
+    bindNode(g,id);gNodes.appendChild(g);nodeEls.set(id,g);
+  }
+  for(const id of nodeEls.keys())if(!nodes.has(id)){nodeEls.get(id).remove();nodeEls.delete(id);}
+}
+
+function drawFrame(){
+  // animate positions/radii
+  for(const o of nodes.values()){
+    o.x+=(o.tx-o.x)*.18;o.y+=(o.ty-o.y)*.18;o.r+=(o.tr-o.r)*.2;
+  }
+  // edges
+  let e='';const seen=new Set();
+  for(const[a,set]of adj)for(const b of set){const k=a<b?a+'_'+b:b+'_'+a;if(seen.has(k))continue;seen.add(k);
+    const A=nodes.get(a),B=nodes.get(b);if(!A||!B)continue;
+    const hl=pathEdges.has(k)?' path':'';
+    e+=`<line class="edge${hl}" x1="${A.x}" y1="${A.y}" x2="${B.x}" y2="${B.y}"></line>`;}
+  gEdges.innerHTML=e;
+  // nodes
+  for(const[id,g]of nodeEls){
+    const o=nodes.get(id);if(!o)continue;
+    g.setAttribute('transform',`translate(${o.x} ${o.y})`);
+    const c=g.querySelector('.node-c');c.setAttribute('r',Math.max(0,o.r).toFixed(2));
+    g.querySelector('.node-hit').setAttribute('r',Math.max(20,o.r+12));
+    let cls='node '+(o.fresh?'fresh':(isLeaf(id)?'leaf':'internal'));
+    if(selA===id)cls+=' sel';if(pathSet.has(id))cls+=' path';
+    g.setAttribute('class',cls);
+  }
+  requestAnimationFrame(drawFrame);
+}
+
+function updateHUD(){
+  document.getElementById('opsUsed').textContent=opsUsed;
+  document.getElementById('opsMin').textContent=opsMin;
+  document.getElementById('statNodes').textContent=nodes.size;
+  document.getElementById('statLeaves').textContent=countLeaves();
+  const pct=opsMin>0?Math.min(100,opsUsed/opsMin*100):(nodes.size<=1?100:0);
+  document.getElementById('progBar').style.width=pct+'%';
+  document.getElementById('emptyHint').style.display=nodes.size===0?'grid':'none';
+  const pill=document.getElementById('modeText');
+  pill.textContent='Режим: '+({node:'вершина',edge:'рёбра',zelda:'сжатие листьев'}[mode]);
+}
+
+/* ============================================================
+   INTERACTION
+============================================================ */
+function svgPoint(ev){const pt=svg.createSVGPoint();const t=ev.touches?ev.touches[0]:ev;pt.x=t.clientX;pt.y=t.clientY;
+  return pt.matrixTransform(svg.getScreenCTM().inverse());}
+
+svg.addEventListener('click',ev=>{
+  if(busy)return;
+  if(ev.target.closest('.node'))return; // node handled separately
+  if(mode==='node'){const p=svgPoint(ev);const id=addNode(p.x,p.y);
+    // auto-connect to nearest existing node to keep it a tree
+    let best=null,bd=1e9;for(const o of nodes.values()){if(o.id===id)continue;const d=(o.x-p.x)**2+(o.y-p.y)**2;if(d<bd){bd=d;best=o.id;}}
+    if(best!==null)addEdge(id,best);
+    renderNodes();frozenMin=false;updateMin();relayout();updateHUD();
+  }
+});
+
+function bindNode(g,id){
+  g.addEventListener('click',ev=>{ev.stopPropagation();if(busy)return;onNodeClick(id);});
+  g.addEventListener('mouseenter',ev=>showTip(ev,id));
+  g.addEventListener('mousemove',ev=>moveTip(ev));
+  g.addEventListener('mouseleave',hideTip);
+}
+
+function onNodeClick(id){
+  if(mode==='edge'){
+    if(selA===null){selA=id;toast('Выбрана вершина '+nodes.get(id).label+' — кликните вторую');}
+    else if(selA===id){selA=null;}
+    else{addEdge(selA,id);selA=null;frozenMin=false;updateMin();relayout();updateHUD();toast('Ребро добавлено');}
+  }else if(mode==='zelda'){
+    if(!isLeaf(id)){toast('Можно выбирать только листья 🍃');return;}
+    if(selA===null){selA=id;toast('Лист '+nodes.get(id).label+' выбран — выберите второй лист');}
+    else if(selA===id){selA=null;}
+    else{const u=selA;selA=null;doZelda(u,id);}
+  }else{ // node mode: clicking a node does nothing special
+  }
+}
+
+function setMode(m){mode=m;selA=null;
+  document.querySelectorAll('[data-mode]').forEach(b=>b.classList.toggle('active',b.dataset.mode===m));
+  updateHUD();}
+document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>setMode(b.dataset.mode));
+
+/* tooltip */
+const tip=document.getElementById('tip');
+function showTip(ev,id){tip.innerHTML=`Вершина ${nodes.get(id).label} · степень <b>${deg(id)}</b>${isLeaf(id)?' · лист':''}`;tip.classList.add('show');moveTip(ev);}
+function moveTip(ev){tip.style.left=ev.clientX+'px';tip.style.top=ev.clientY+'px';}
+function hideTip(){tip.classList.remove('show');}
+
+/* ============================================================
+   ZELDA OPERATION
+============================================================ */
+function findPath(u,v){
+  const prev=new Map();prev.set(u,null);const q=[u];
+  while(q.length){const x=q.shift();if(x===v)break;for(const n of adj.get(x))if(!prev.has(n)){prev.set(n,x);q.push(n);}}
+  if(!prev.has(v))return null;const path=[];let c=v;while(c!==null){path.push(c);c=prev.get(c);}return path.reverse();
+}
+
+async function doZelda(u,v){
+  const path=findPath(u,v);if(!path||path.length<2){toast('Нет пути между вершинами');return;}
+  busy=true;hideTip();
+  // 1. highlight path
+  pathSet=new Set(path);pathEdges=new Set();
+  for(let i=0;i<path.length-1;i++){const a=path[i],b=path[i+1];pathEdges.add(a<b?a+'_'+b:b+'_'+a);}
+  await sleep(750);
+  // 2. compute centroid + gather external neighbors
+  let cx=0,cy=0;path.forEach(id=>{cx+=nodes.get(id).x;cy+=nodes.get(id).y;});cx/=path.length;cy/=path.length;
+  const ext=new Set();path.forEach(id=>{for(const n of adj.get(id))if(!pathSet.has(n))ext.add(n);});
+  // 3. shrink path nodes into centroid
+  path.forEach(id=>{const o=nodes.get(id);o.tx=cx;o.ty=cy;o.tr=0;});
+  await sleep(480);
+  // 4. mutate graph
+  path.forEach(removeNode);
+  const w=nextId++;nodes.set(w,{id:w,x:cx,y:cy,tx:cx,ty:cy,r:0,tr:24,label:'w',fresh:true});adj.set(w,new Set());
+  for(const n of ext)addEdge(w,n);
+  pathSet.clear();pathEdges.clear();
+  renderNodes();
+  // 5. freeze min on first op, count, relayout
+  if(!frozenMin){frozenMin=true;}
+  opsUsed++;
+  relayout();updateHUD();
+  await sleep(560);
+  nodes.get(w).fresh=false;
+  busy=false;
+  if(nodes.size===1){
+    updateHUD();
+    if(opsUsed<=opsMin)toast('🎉 Дерево сжато за '+opsUsed+' оп. — оптимально!',true);
+    else toast('Дерево сжато за '+opsUsed+' операций',true);
+    confetti();
+  }else{updateHUD();}
+}
+
+/* auto-solve: greedily pair leaves */
+async function autoSolve(){
+  if(busy)return;
+  if(nodes.size<=1){toast('Дерево уже сжато');return;}
+  setMode('zelda');
+  while(nodes.size>1 && !busy){
+    const leaves=[...nodes.keys()].filter(isLeaf);
+    if(leaves.length<2){ // path of 2? pick any two distinct connected
+      const ids=[...nodes.keys()];await doZelda(ids[0],ids[1]);
+    }else{
+      // pick two leaves that are far apart (different subtrees) — simple: first & last
+      await doZelda(leaves[0],leaves[leaves.length-1]);
+    }
+    await sleep(180);
+  }
+}
+
+/* ============================================================
+   CONFETTI
+============================================================ */
+function confetti(){
+  const cols=['#0E7BAD','#FF6B6B','#06D6A0','#FFD166','#118AB2'];
+  for(let i=0;i<120;i++){
+    const c=document.createElement('div');c.className='confetti';
+    const s=6+Math.random()*8;c.style.width=s+'px';c.style.height=s*.6+'px';
+    c.style.left=Math.random()*100+'vw';c.style.background=cols[i%cols.length];
+    c.style.opacity=.9;const dur=2.2+Math.random()*1.8;
+    c.style.animation=`fall ${dur}s cubic-bezier(.3,.1,.3,1) ${Math.random()*.5}s forwards`;
+    document.body.appendChild(c);setTimeout(()=>c.remove(),(dur+1)*1000);
+  }
+}
+
+/* buttons */
+document.getElementById('randomBtn').onclick=randomTree;
+document.getElementById('clearBtn').onclick=()=>{if(!busy)clearAll();};
+document.getElementById('autoBtn').onclick=autoSolve;
+
+/* ============================================================
+   ALGORITHM PAGE
+============================================================ */
+const bruteLines=[
+  [['kw','функция '],['fn','найтиЛистья'],['',' (дерево):']],
+  [['',' '],['cm','# строим список смежности — O(N) памяти']],
+  [['',' список ← {}']],
+  [['',' '],['kw','для '],['','каждой вершины v:']],
+  [['','   список[v] ← []']],
+  [['',' '],['kw','для '],['','каждого ребра (u, v):']],
+  [['','   список[u].добавить(v)']],
+  [['','   список[v].добавить(u)']],
+  [['',' листья ← []']],
+  [['',' '],['kw','для '],['','каждой вершины v:        '],['cm','# ещё проход O(N)']],
+  [['',' '],['kw','  если '],['','длина(список[v]) == '],['nm','1'],['',':']],
+  [['','     листья.добавить(v)']],
+  [['',' '],['kw','вернуть '],['','листья']]
+];
+const optLines=[
+  [['kw','функция '],['fn','найтиЛистья'],['',' (дерево):']],
+  [['',' '],['cm','# массив степеней вместо списков']],
+  [['',' степень ← массив[N] из '],['nm','0']],
+  [['',' '],['kw','для '],['','каждого ребра (u, v):    '],['cm','# один проход O(N)']],
+  [['','   степень[u] += '],['nm','1']],
+  [['','   степень[v] += '],['nm','1']],
+  [['',' '],['kw','вернуть '],['','[ v | степень[v] == '],['nm','1'],['',' ]']]
+];
+function renderCode(el,lines){
+  el.innerHTML=lines.map((toks,i)=>{
+    const inner=toks.map(([t,s])=>t?`<span class="tok-${t}">${s}</span>`:s).join('');
+    return `<div class="cl" data-i="${i}"><span class="ln">${i+1}</span><span>${inner}</span></div>`;
+  }).join('');
+}
+renderCode(document.getElementById('codeBrute'),bruteLines);
+renderCode(document.getElementById('codeOpt'),optLines);
+
+let runT=null;
+async function runCodeAnim(){
+  clearTimeout(runT);
+  const bl=[...document.querySelectorAll('#codeBrute .cl')];
+  const ol=[...document.querySelectorAll('#codeOpt .cl')];
+  bl.concat(ol).forEach(l=>l.classList.remove('on'));
+  const seq=[];const maxL=Math.max(bl.length,ol.length);
+  for(let i=0;i<maxL;i++)seq.push(i);
+  let i=0;
+  function step(){
+    bl.forEach(l=>l.classList.remove('on'));ol.forEach(l=>l.classList.remove('on'));
+    if(bl[i])bl[i].classList.add('on');if(ol[i])ol[i].classList.add('on');
+    i++;if(i<maxL)runT=setTimeout(step,650);
+    else runT=setTimeout(()=>{bl.forEach(l=>l.classList.remove('on'));ol.forEach(l=>l.classList.remove('on'));},800);
+  }
+  step();
+}
+document.getElementById('runCode').onclick=runCodeAnim;
+document.getElementById('resetCode').onclick=()=>{clearTimeout(runT);document.querySelectorAll('.cl.on').forEach(l=>l.classList.remove('on'));};
+
+/* benchmark */
+const fmt=n=>n.toLocaleString('ru-RU');
+function bench(){
+  const N=+document.getElementById('nRange').value;
+  document.getElementById('nVal').textContent=fmt(N);
+  const brute=N*3, opt=N*2;          // illustrative op counts
+  const max=brute;
+  document.getElementById('bruteOps').textContent=fmt(brute);
+  document.getElementById('optOps').textContent=fmt(opt);
+  document.getElementById('bruteBar').style.width='100%';
+  document.getElementById('optBar').style.width=(opt/max*100)+'%';
+  document.getElementById('bruteBar').textContent='3N';
+  document.getElementById('optBar').textContent='2N';
+  document.getElementById('verdict').innerHTML=`При <b>N = ${fmt(N)}</b> лобовой способ выполняет около <b>${fmt(brute)}</b> элементарных операций, оптимальный — <b>${fmt(opt)}</b>. Это <b>в 1,5 раза меньше</b> работы и без накладных расходов на построение списков смежности.`;
+}
+document.getElementById('nRange').oninput=bench;
+bench();
+
+/* ============================================================
+   FACTS
+============================================================ */
+const facts=[
+  {ic:'net',col:'var(--ocean)',bg:'var(--ocean-soft)',t:'Оптимизация топологии сети',
+   d:'Стягивание путей помогает упростить графы маршрутизации: цепочки транзитных узлов сжимаются в один логический хоп.',w:'сети'},
+  {ic:'compile',col:'var(--coral)',bg:'var(--coral-soft)',t:'Синтаксические деревья компиляторов',
+   d:'Компиляторы сворачивают цепочки единичных продукций и постоянных выражений, уменьшая дерево разбора перед генерацией кода.',w:'компиляторы'},
+  {ic:'dna',col:'var(--mint)',bg:'var(--mint-soft)',t:'Филогенетические деревья',
+   d:'В биоинформатике слабо поддержанные ветви эволюционных деревьев стягивают, получая более устойчивую консенсусную топологию.',w:'биология'},
+  {ic:'db',col:'#118AB2',bg:'#118AB222',t:'Деревья запросов в СУБД',
+   d:'Оптимизатор запросов сжимает цепочки операторов плана выполнения, объединяя проекции и фильтры в один шаг.',w:'базы данных'}
+];
+const icons={
+  net:'<circle cx="12" cy="5" r="2.4"/><circle cx="5" cy="18" r="2.4"/><circle cx="19" cy="18" r="2.4"/><path d="M12 7.4 6 16M12 7.4 18 16M7 18h10" stroke-linecap="round"/>',
+  compile:'<path d="M8 6 4 12l4 6M16 6l4 6-4 6M13 4l-2 16" stroke-linecap="round" stroke-linejoin="round"/>',
+  dna:'<path d="M7 3c0 6 10 6 10 12M17 3c0 6-10 6-10 12M7 4h10M7 8h10M7 16h10M7 20h10" stroke-linecap="round"/>',
+  db:'<ellipse cx="12" cy="5" rx="7" ry="3"/><path d="M5 5v6c0 1.7 3.1 3 7 3s7-1.3 7-3V5M5 11v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" stroke-linecap="round"/>'
+};
+document.getElementById('factsGrid').innerHTML=facts.map(f=>`
+  <div class="card fact">
+    <div class="ic" style="background:${f.bg};color:${f.col}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${icons[f.ic]}</svg></div>
+    <h3>${f.t}</h3><p>${f.d}</p><span class="where">${f.w}</span>
+  </div>`).join('');
+
+const dyk=[
+  'Дерево с N вершинами всегда имеет ровно N − 1 ребро — независимо от формы.',
+  'Минимальное число операций «Зельда» равно ⌈число листьев / 2⌉.',
+  'Каждая операция уменьшает число листьев минимум на один, поэтому процесс всегда завершается.',
+  'Путь между любыми двумя вершинами в дереве единственный — поэтому путь u→v определён однозначно.',
+  'У звезды из k лучей k листьев, и сжать её до точки можно за ⌈k / 2⌉ операций.',
+  'Сумма степеней всех вершин дерева равна удвоенному числу рёбер: 2(N − 1).',
+  'Любая вершина дерева степени 1 — это лист; у пути ровно два листа.',
+  'Стягивание ребра — частный случай: путь длиной в одно ребро между двумя соседними листьями.'
+];
+let lastDyk=-1;
+document.getElementById('dykBtn').onclick=()=>{
+  let i;do{i=Math.floor(Math.random()*dyk.length);}while(i===lastDyk&&dyk.length>1);lastDyk=i;
+  const t=document.getElementById('dykText');t.style.opacity=0;
+  setTimeout(()=>{t.textContent=dyk[i];t.style.opacity=1;},220);
+};
+
+/* ============================================================
+   BOOT
+============================================================ */
+setMode('edge');
+setTab(localStorage.getItem('zelda-tab')||'viz');
+requestAnimationFrame(drawFrame);
+randomTree();
+</script>
+</body>
+</html>
