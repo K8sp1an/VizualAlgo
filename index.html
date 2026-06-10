@@ -478,27 +478,40 @@ function relayout(snap){
   const ids=[...nodes.keys()];
   if(ids.length===0){updateHUD();return;}
   if(ids.length===1){const o=nodes.get(ids[0]);o.tx=VW/2;o.ty=VH/2;if(snap){o.x=o.tx;o.y=o.ty;}updateHUD();return;}
-  const P={};ids.forEach(id=>{const o=nodes.get(id);P[id]={x:o.x||Math.random()*VW,y:o.y||Math.random()*VH};});
-  const L=130;
-  for(let it=0;it<320;it++){
-    const F={};ids.forEach(id=>F[id]={x:0,y:0});
-    for(let i=0;i<ids.length;i++)for(let j=i+1;j<ids.length;j++){
-      const a=P[ids[i]],b=P[ids[j]];let dx=a.x-b.x,dy=a.y-b.y,d2=dx*dx+dy*dy||.01,d=Math.sqrt(d2);
-      const rep=9000/d2;F[ids[i]].x+=dx/d*rep;F[ids[i]].y+=dy/d*rep;F[ids[j]].x-=dx/d*rep;F[ids[j]].y-=dy/d*rep;
-    }
-    for(const a of ids)for(const b of adj.get(a)){if(a<b){
-      const pa=P[a],pb=P[b];let dx=pb.x-pa.x,dy=pb.y-pa.y,d=Math.sqrt(dx*dx+dy*dy)||.01,f=(d-L)*.045;
-      F[a].x+=dx/d*f*L*.5;F[a].y+=dy/d*f*L*.5;F[b].x-=dx/d*f*L*.5;F[b].y-=dy/d*f*L*.5;
-    }}
-    ids.forEach(id=>{F[id].x+=(VW/2-P[id].x)*.012;F[id].y+=(VH/2-P[id].y)*.012;
-      P[id].x+=Math.max(-22,Math.min(22,F[id].x));P[id].y+=Math.max(-22,Math.min(22,F[id].y));});
+
+  // Find centroid root via iterative leaf peeling
+  const td=new Map();for(const id of ids)td.set(id,adj.get(id).size);
+  let cl=ids.filter(id=>td.get(id)<=1);
+  const rem=new Set(ids);
+  while(rem.size>2){
+    const nl=[];
+    for(const l of cl){rem.delete(l);for(const nb of adj.get(l)){if(rem.has(nb)){td.set(nb,td.get(nb)-1);if(td.get(nb)===1)nl.push(nb);}}}
+    if(!nl.length)break;cl=nl;
   }
-  let minX=1e9,maxX=-1e9,minY=1e9,maxY=-1e9;
-  ids.forEach(id=>{minX=Math.min(minX,P[id].x);maxX=Math.max(maxX,P[id].x);minY=Math.min(minY,P[id].y);maxY=Math.max(maxY,P[id].y);});
-  const pad=52,sw=(maxX-minX)||1,sh=(maxY-minY)||1;
-  const s=Math.min((VW-2*pad)/sw,(VH-2*pad)/sh,1.6);
-  const ox=(VW-sw*s)/2-minX*s, oy=(VH-2*pad-sh*s)/2+pad-minY*s + 6;
-  ids.forEach(id=>{const o=nodes.get(id);o.tx=P[id].x*s+ox;o.ty=P[id].y*s+oy;if(snap){o.x=o.tx;o.y=o.ty;}});
+  const root=[...rem][0];
+
+  // BFS: assign depth and build children lists
+  const ch=new Map();for(const id of ids)ch.set(id,[]);
+  const dep=new Map([[root,0]]);
+  const q=[root];let maxDep=0;
+  while(q.length){const cur=q.shift();for(const nb of adj.get(cur)){if(!dep.has(nb)){dep.set(nb,dep.get(cur)+1);if(dep.get(nb)>maxDep)maxDep=dep.get(nb);ch.get(cur).push(nb);q.push(nb);}}}
+
+  // Compute subtree leaf-widths
+  const sw=new Map();
+  function calcW(id){const c=ch.get(id);if(!c.length){sw.set(id,1);return;}c.forEach(calcW);sw.set(id,c.reduce((s,k)=>s+sw.get(k),0));}
+  calcW(root);
+
+  // Assign fractional x-positions (1 unit per leaf)
+  const xp=new Map();
+  function assignX(id,off){const c=ch.get(id);if(!c.length){xp.set(id,off+.5);return;}let cur=off;for(const k of c){assignX(k,cur);cur+=sw.get(k);}xp.set(id,(xp.get(c[0])+xp.get(c[c.length-1]))/2);}
+  assignX(root,0);
+
+  // Map to canvas: root at top, leaves at bottom
+  const pad=46,totalW=sw.get(root);
+  const xS=(VW-2*pad)/totalW;
+  const yS=Math.min(88,(VH-2*pad)/(maxDep||1));
+  const yOff=(VH-2*pad-yS*maxDep)/2+pad;
+  for(const id of ids){const o=nodes.get(id);o.tx=pad+xp.get(id)*xS;o.ty=yOff+dep.get(id)*yS;if(snap){o.x=o.tx;o.y=o.ty;}}
   updateHUD();
 }
 
